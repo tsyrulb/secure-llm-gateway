@@ -1,0 +1,58 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-test-scan:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install bandit==1.7.9
+
+      - name: Unit tests
+        run: pytest -q
+
+      - name: Lint/SAST (Bandit)
+        run: bandit -r api -ll || true
+
+      - name: Build image
+        run: docker build -f infra/Dockerfile -t ghcr.io/${{ github.repository }}:${{ github.sha }} .
+
+      - name: Security Scan (Trivy FS)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          scan-type: fs
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          format: table
+          output: trivy-fs.txt
+
+      - name: SBOM (Syft)
+        uses: anchore/sbom-action@v0
+        with:
+          image: ghcr.io/${{ github.repository }}:${{ github.sha }}
+          artifact-name: sbom-spdx.json
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-artifacts
+          path: |
+            trivy-fs.txt
+            sbom-spdx.json

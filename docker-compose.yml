@@ -1,0 +1,25 @@
+# docker-compose.yml
+services:
+  opa:
+    image: openpolicyagent/opa:latest
+    command: ["run","--server","--watch","/policies","--addr=0.0.0.0:8181","--log-level=debug"]
+    volumes: ["./policies:/policies:ro"]
+    healthcheck:
+      # call the binary directly; no shell or curl needed
+      test: ["CMD", "/opa", "version"]            # or: ["CMD","/opa","eval","-b","/policies","1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: .
+    environment:
+      OPA_URL: "http://opa:8181/v1/data/gateway/deny"
+      OPA_FAIL_CLOSED: "true"
+      JWT_SECRET: "dev-secret"
+      ALLOWED_MODELS: "stub,openai:gpt-4o,openai:gpt-4o-mini"
+      CORS_ORIGINS: "*"
+    ports: ["8000:8000"]
+    depends_on:
+      opa:
+        condition: service_healthy

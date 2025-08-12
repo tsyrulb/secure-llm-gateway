@@ -1,0 +1,57 @@
+# --- Python / FastAPI ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.eggs/
+build/
+dist/
+pip-wheel-metadata/
+.tox/
+.cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual envs
+.venv/
+venv/
+ENV/
+env/
+
+# Logs & runtime
+*.log
+logs/
+uvicorn*.log
+
+# Local config / secrets
+.env
+.env.*
+docker-compose.override.yml
+
+# Project test artifacts (keep policy file tracked)
+trusted.jwt
+req.json
+deny.json
+opa-input.json
+
+# Editors/IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Archives & large exports
+*.zip
+*.tar
+*.tar.gz
+*.tgz
