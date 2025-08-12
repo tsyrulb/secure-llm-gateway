@@ -1,7 +1,9 @@
+import os  
 from fastapi import Security, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import jwt, JWTError
-import os
+
+# This module is now self-contained and does not import from api.config
 
 ALGO = "HS256"
 security = HTTPBearer(auto_error=False)
@@ -10,7 +12,7 @@ def get_current_tenant(credentials: HTTPAuthorizationCredentials = Security(secu
     """
     Accepts either:
       - dev-token  -> maps to tenant 'dev-tenant'
-      - JWT (HS256, secret from JWT_SECRET) with 'sub' or 'tenant' claim
+      - JWT (HS256, secret from the JWT_SECRET environment variable)
     """
     if credentials is None or (credentials.scheme or "").lower() != "bearer":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing Authorization header")
@@ -21,6 +23,7 @@ def get_current_tenant(credentials: HTTPAuthorizationCredentials = Security(secu
     if token == "dev-token":
         return {"id": "dev-tenant"}
 
+    # This is the most reliable method and avoids any import-order conflicts.
     secret = os.getenv("JWT_SECRET")
     if not secret:
         raise HTTPException(status_code=500, detail="Server misconfigured: JWT_SECRET not set")

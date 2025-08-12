@@ -1,58 +1,135 @@
-name: ci
+# A more robust CI/CD pipeline for the Secure LLM Gateway
+name: CI
 
+# This workflow runs on pushes to the main branch and on pull requests targeting main.
 on:
   push:
+    branches: [ "main" ]
   pull_request:
+    branches: [ "main" ]
 
 jobs:
+  # This job handles all testing, linting, scanning, and building.
   build-test-scan:
     runs-on: ubuntu-latest
+    # Permissions are required for pushing to the GitHub Container Registry (GHCR)
+    # and for other security-related actions.
     permissions:
-      id-token: write
       contents: read
       packages: write
-    steps:
-      - uses: actions/checkout@v4
+      id-token: write
 
+    steps:
+      # Step 1: Check out the repository code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Step 2: Set up the Python environment
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install deps
+      # Step 3: Cache Python dependencies to speed up subsequent workflow runs
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      # Step 4: Install all required dependencies, including development tools
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install bandit==1.7.9
+          # Install tools for linting, formatting, and security scanning
+          pip install bandit==1.7.9 ruff black
 
-      - name: Unit tests
+      # Step 5: Run linting and formatting checks to enforce code quality
+      - name: Lint with Ruff and Format with Black
+        run: |
+          echo "Linting with Ruff..."
+          ruff check .
+          echo "Checking formatting with Black..."
+          black --check .
+
+      # Step 6: Run the unit test suite
+      - name: Run unit tests
         run: pytest -q
 
-      - name: Lint/SAST (Bandit)
-        run: bandit -r api -ll || true
+      # Step 7: Run a Static Application Security Test (SAST) scan with Bandit
+      - name: Run SAST scan (Bandit)
+        run: bandit -r api -ll
 
-      - name: Build image
-        run: docker build -f infra/Dockerfile -t ghcr.io/${{ github.repository }}:${{ github.sha }} .
-
-      - name: Security Scan (Trivy FS)
+      # Step 8: Scan the requirements.txt file for known vulnerabilities with Trivy
+      - name: Scan requirements.txt for vulnerabilities
         uses: aquasecurity/trivy-action@0.24.0
         with:
-          scan-type: fs
-          severity: CRITICAL,HIGH
+          scan-type: 'fs'
+          scan-ref: 'requirements.txt'
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
           ignore-unfixed: true
-          format: table
-          output: trivy-fs.txt
+          output: 'trivy-reqs-report.txt'
 
-      - name: SBOM (Syft)
-        uses: anchore/sbom-action@v0
+      # Step 9: Log in to the GitHub Container Registry (only on pushes to main)
+      - name: Log in to GitHub Container Registry
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
         with:
-          image: ghcr.io/${{ github.repository }}:${{ github.sha }}
-          artifact-name: sbom-spdx.json
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload artifacts
+      # Step 10: Build the Docker image and push it to GHCR (only on pushes to main)
+      - name: Build and push Docker image
+        id: build-and-push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          # The 'push' parameter determines whether to push the image after building.
+          # This is enabled only for pushes to the main branch.
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: ghcr.io/${{ github.repository }}:${{ github.sha }}
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+      # Step 11: Scan the final, built Docker image for vulnerabilities
+      - name: Scan Docker image for vulnerabilities
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: 'ghcr.io/${{ github.repository }}:${{ github.sha }}'
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+          output: 'trivy-image-report.txt'
+
+      # Step 12: Run the end-to-end smoke tests using Docker Compose
+      - name: Run Smoke Tests
+        run: |
+          # The docker-compose file expects this secret for testing.
+          export JWT_SECRET="ci-test-secret"
+          # Start all services (api, opa) in the background.
+          docker-compose up -d
+          # Wait for the services to become healthy. A simple sleep is often
+          # sufficient for CI, but a more robust script could poll the /readyz endpoint.
+          echo "Waiting for services to become healthy..."
+          sleep 20
+          # Install PowerShell to run the smoke test script.
+          echo "Installing PowerShell..."
+          sudo apt-get update && sudo apt-get install -y powershell
+          # Execute the smoke test script against the running services.
+          echo "Running smoke tests..."
+          pwsh -Command ./scripts/run-smoke.ps1
+
+      # Step 13: Upload all generated reports as build artifacts
+      # This step runs even if previous steps fail, ensuring reports are always available.
+      - name: Upload security artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: security-artifacts
+          name: security-and-test-reports
           path: |
-            trivy-fs.txt
-            sbom-spdx.json
+            trivy-reqs-report.txt
+            trivy-image-report.txt

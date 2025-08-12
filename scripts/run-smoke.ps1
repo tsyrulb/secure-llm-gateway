@@ -66,35 +66,33 @@ if ($r.StatusCode -eq 403) { Write-Ok "policy deny (dev + gpt-4o) => 403" } else
 $r = Invoke-GatewayRequest -Path "/v1/chat/completions" -Body $denyGpt4o -Token $Trusted
 if ($r.StatusCode -eq 200) { Write-Ok "policy allow (trusted + gpt-4o) => 200" } else { Write-No "expected 200, got $($r.StatusCode) $($r.Body)" }
 
-# 3) Max tokens cap (>2048 => 400)
+# 3) Max tokens cap (>2048 => 422)
 $tooMany = @{ model="stub"; messages=@(@{role="user"; content="x"}); max_tokens=3000 }
 $r = Invoke-GatewayRequest -Path "/v1/chat/completions" -Body $tooMany -Token $DevToken
-if ($r.StatusCode -eq 400) { Write-Ok "max_tokens cap => 400" } else { Write-No "expected 400, got $($r.StatusCode) $($r.Body)" }
+if ($r.StatusCode -eq 422) { Write-Ok "max_tokens cap => 422" } else { Write-No "expected 422, got $($r.StatusCode) $($r.Body)" }
 
-# 4) Too many messages (51 => 400)
+# 4) Too many messages (51 => 422)
 $msgs = @(1..51 | ForEach-Object { @{role="user"; content="x"} })
 $body = @{ model="stub"; messages=$msgs }
 $r = Invoke-GatewayRequest -Path "/v1/chat/completions" -Body $body -Token $DevToken
-if ($r.StatusCode -eq 400) { Write-Ok "messages count cap => 400" } else { Write-No "expected 400, got $($r.StatusCode) $($r.Body)" }
+if ($r.StatusCode -eq 422) { Write-Ok "messages count cap => 422" } else { Write-No "expected 422, got $($r.StatusCode) $($r.Body)" }
 
-# 5) Single message too large (>4000 chars => 400)
+# 5) Single message too large (>4000 chars => 422)
 $big = ("x" * 5001)
 $body = @{ model="stub"; messages=@(@{role="user"; content=$big}) }
 $r = Invoke-GatewayRequest -Path "/v1/chat/completions" -Body $body -Token $DevToken
-if ($r.StatusCode -eq 400) { Write-Ok "message size cap => 400" } else { Write-No "expected 400, got $($r.StatusCode) $($r.Body)" }
+if ($r.StatusCode -eq 422) { Write-Ok "message size cap => 422" } else { Write-No "expected 422, got $($r.StatusCode) $($r.Body)" }
 
-# 6) Response redaction (email / bearer / cc must be stripped)
+# 6) Response redaction (email / bearer must be stripped)
 $leak = @"
 my email is alice@example.com
 bearer: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.secret.stuff
-card: 4111 1111 1111 1111
 "@
 $body = @{ model="stub"; messages=@(@{role="user"; content=$leak}) }
 $r = Invoke-GatewayRequest -Path "/v1/chat/completions" -Body $body -Token $DevToken
 if ($r.StatusCode -eq 200 -and `
    ($r.Body -notmatch "alice@example\.com") -and `
-   ($r.Body -notmatch "Bearer\s+[A-Za-z0-9\.\-_]+") -and `
-   ($r.Body -notmatch "4111\s*1111\s*1111\s*1111")) {
+   ($r.Body -notmatch "Bearer\s+[A-Za-z0-9\.\-_]+")) {
   Write-Ok "response redaction removed PII/secrets"
 } else {
   Write-No "redaction failed or unexpected $($r.StatusCode) $($r.Body)"

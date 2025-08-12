@@ -1,0 +1,69 @@
+version: '3.8'
+
+services:
+  # The OPA service remains the same as in the development compose file.
+  opa:
+    image: openpolicyagent/opa:latest
+    command: ["run", "--server", "--watch", "/policies", "--addr=0.0.0.0:8181", "--log-level=info"]
+    volumes: ["./policies:/policies:ro"]
+    healthcheck:
+      test: ["CMD", "/opa", "version"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    # For production, it's good practice to set resource limits.
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: '256M'
+        reservations:
+          cpus: '0.25'
+          memory: '128M'
+
+  # The API service is configured for production.
+  api:
+    # In production, you should use a specific, immutable image tag from your container registry.
+    # Replace 'latest' or a SHA with a version tag like 'v1.0.0'.
+    image: ghcr.io/tsyrulb/secure-llm-gateway:latest
+    # The 'build' context is removed as we are using a pre-built image.
+    restart: always
+    ports:
+      - "8000:8000"
+    depends_on:
+      opa:
+        condition: service_healthy
+    
+    # Environment variables for non-sensitive configuration.
+    environment:
+      - OPA_URL=http://opa:8181/v1/data/gateway/deny
+      - OPA_FAIL_CLOSED=true
+      - ALLOWED_MODELS=openai:gpt-4o,openai:gpt-4o-mini
+      - CORS_ORIGINS=https://your-production-frontend.com
+      # Point the application to the file paths where Docker will mount the secrets.
+      - JWT_SECRET_FILE=/run/secrets/jwt_secret
+      - OPENAI_API_KEY_FILE=/run/secrets/openai_api_key
+
+    # Mount the secrets into the container.
+    # Docker makes these secrets available at the specified paths.
+    secrets:
+      - jwt_secret
+      - openai_api_key
+
+    # Set resource limits for the API service as well.
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: '512M'
+        reservations:
+          cpus: '0.5'
+          memory: '256M'
+
+# Top-level 'secrets' definition.
+# This tells Docker Compose to look for the source files on the host machine.
+secrets:
+  jwt_secret:
+    file: ./jwt_secret.txt
+  openai_api_key:
+    file: ./openai_api_key.txt

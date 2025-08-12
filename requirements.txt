@@ -7,3 +7,4 @@ redis[async]==5.0.7
 pytest==8.2.2
 pytest-asyncio==0.23.8
 anyio==4.4.0
+pydantic-settings
