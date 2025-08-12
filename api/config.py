@@ -25,10 +25,13 @@ class Settings(BaseSettings):
     TOTAL_MESSAGE_CHARS_LIMIT: int = 8000
     SINGLE_MESSAGE_CHARS_LIMIT: int = 4000
 
+    # --- THIS IS THE FIX ---
+    # Add the missing firewall settings so they can be configured and patched in tests.
+    CONTEXT_FIREWALL_RISK_THRESHOLD: int = 10
+    ALLOWED_CONTEXT_ORIGINS: List[str] = []
+
     # --- Telemetry ---
     OTEL_EXPORTER_OTLP_ENDPOINT: Optional[str] = None
-
-    # The custom Config class has been removed to allow default parsing behavior.
 
 # Create a single, importable instance of the settings
 settings = Settings()
