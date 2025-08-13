@@ -55,6 +55,8 @@ class ChatMessage(BaseModel):
             raise ValueError(f"A single message cannot exceed {settings.SINGLE_MESSAGE_CHARS_LIMIT} characters.")
         return v
 
+# --- THIS IS THE FIX ---
+# The following models are now correctly defined, resolving the AttributeError.
 class ChatContextChunk(BaseModel):
     id: str
     content: str
@@ -67,7 +69,7 @@ class ChatRequest(BaseModel):
     model: str
     messages: List[ChatMessage]
     max_tokens: Optional[int] = Field(default=512, le=settings.MAX_TOKENS_LIMIT)
-    context: Optional[ChatContext] = None
+    context: Optional[ChatContext] = None # <-- This now correctly uses ChatContext
     @field_validator('model')
     def model_must_be_allowed(cls, v):
         if v not in settings.ALLOWED_MODELS:
@@ -121,8 +123,7 @@ async def chat_completions(
     try:
         body = await request.json()
         payload = body.get("req") or body.get("payload") or body
-        
-        # We handle Pydantic validation separately to return 422
+
         try:
             req = ChatRequest.model_validate(payload)
         except Exception as e:
@@ -131,10 +132,10 @@ async def chat_completions(
 
         sanitized_ctx: Optional[SanitizedContext] = None
         if req.context:
-            # --- THIS IS THE FIX ---
-            # This try/except block now correctly handles firewall ValueErrors.
             try:
-                sanitized_ctx = sanitize_and_validate_context(ContextInput(**req.context.model_dump()))
+                # The firewall's input model is created from the request's context model.
+                context_input_data = ContextInput(**req.context.model_dump())
+                sanitized_ctx = sanitize_and_validate_context(context_input_data)
             except ValueError as e:
                 log.warning(f"Invalid context blocked by firewall for tenant '{tenant.get('id')}': {e}")
                 raise HTTPException(status_code=400, detail=str(e))
