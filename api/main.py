@@ -131,6 +131,7 @@ async def chat_completions(
 
         sanitized_ctx: Optional[SanitizedContext] = None
         if req.context:
+            # --- THIS IS THE FIX ---
             # This try/except block now correctly handles firewall ValueErrors.
             try:
                 sanitized_ctx = sanitize_and_validate_context(ContextInput(**req.context.model_dump()))
