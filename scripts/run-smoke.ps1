@@ -47,9 +47,8 @@ function Invoke-GatewayRequest {
     $r = $_.Exception.Response
     $code = if ($r) { [int]$r.StatusCode } else { 0 }
     $content = ""
-    if ($r -and $r.GetResponseStream()) {
-      $sr = New-Object IO.StreamReader($r.GetResponseStream())
-      $content = $sr.ReadToEnd()
+    if ($r) {
+      $content = $r.Content.ReadAsStringAsync().GetAwaiter().GetResult()
     }
     [pscustomobject]@{ StatusCode = $code; Body = $content }
   }
