@@ -32,25 +32,70 @@ if (-not (Test-Path $TrustedJwtFile)) {
 }
 $Trusted = Get-Content -Raw $TrustedJwtFile
 
+# Robust request helper that works on Windows PS 5.1 and pwsh 7+
 function Invoke-GatewayRequest {
   param(
     [Parameter(Mandatory)] [string]$Path,
     [Parameter(Mandatory)] [hashtable]$Body,
     [Parameter(Mandatory)] [string]$Token
   )
-  try {
-    $resp = Invoke-WebRequest -UseBasicParsing -Method Post -Uri "$BaseUrl$Path" `
-      -Headers @{ Authorization = "Bearer $Token"; "Content-Type"="application/json"} `
-      -Body (Json $Body)
-    [pscustomobject]@{ StatusCode = $resp.StatusCode; Body = $resp.Content }
-  } catch {
-    $r = $_.Exception.Response
-    $code = if ($r) { [int]$r.StatusCode } else { 0 }
-    $content = ""
-    if ($r) {
-      $content = $r.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+
+  $headers = @{ Authorization = "Bearer $Token"; "Content-Type" = "application/json" }
+  $uri = "$BaseUrl$Path"
+  $payload = Json $Body
+
+  $supportsSkip = (Get-Command Invoke-WebRequest).Parameters.ContainsKey('SkipHttpErrorCheck')
+
+  if ($supportsSkip) {
+    # PowerShell 7+: don’t throw on non-2xx
+    $resp = Invoke-WebRequest -UseBasicParsing -Method Post -Uri $uri -Headers $headers -Body $payload -SkipHttpErrorCheck
+    return [pscustomobject]@{
+      StatusCode = [int]$resp.StatusCode
+      Body       = $resp.Content
     }
-    [pscustomobject]@{ StatusCode = $code; Body = $content }
+  }
+  else {
+    # Windows PowerShell 5.1 fallback
+    try {
+      $resp = Invoke-WebRequest -UseBasicParsing -Method Post -Uri $uri -Headers $headers -Body $payload
+      return [pscustomobject]@{
+        StatusCode = [int]$resp.StatusCode
+        Body       = $resp.Content
+      }
+    }
+    catch {
+      # Two common shapes: HttpWebResponse (stream) or HttpResponseMessage (no stream)
+      $ex = $_.Exception
+      $respObj = $ex.Response
+      $code = 0
+      $content = ""
+
+      if ($respObj -is [System.Net.HttpWebResponse]) {
+        $code = [int]$respObj.StatusCode
+        $stream = $respObj.GetResponseStream()
+        if ($stream) {
+          $sr = New-Object IO.StreamReader($stream)
+          $content = $sr.ReadToEnd()
+          $sr.Dispose()
+        }
+      }
+      elseif ($respObj -and $respObj.GetType().FullName -eq 'System.Net.Http.HttpResponseMessage') {
+        $code = [int]$respObj.StatusCode
+        # Read body safely
+        try { $content = $respObj.Content.ReadAsStringAsync().GetAwaiter().GetResult() } catch { $content = "" }
+      }
+      else {
+        # Last resort, try ErrorDetails
+        if ($_.ErrorDetails -and $_.ErrorDetails.Message) {
+          $content = $_.ErrorDetails.Message
+        }
+      }
+
+      return [pscustomobject]@{
+        StatusCode = $code
+        Body       = $content
+      }
+    }
   }
 }
 
@@ -58,7 +103,9 @@ function Invoke-GatewayRequest {
 try {
   $h = Invoke-RestMethod "$BaseUrl/healthz"
   $r = Invoke-RestMethod "$BaseUrl/readyz"
-  Write-Ok "healthz ok: $($h.ok)  readyz: $((($r | ConvertTo-Json -Compress)))"
+  # Only show the keys that are likely present (LOCAL/OPA)
+  $readyCompact = if ($r.mode) { @{ mode = $r.mode; ready = $r.ready } } else { $r }
+  Write-Ok "healthz ok: $($h.ok)  readyz: $((($readyCompact | ConvertTo-Json -Compress)))"
 } catch { Write-No "health/ready failed: $_"; exit 1 }
 
 # Bodies
