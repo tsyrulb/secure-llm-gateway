@@ -11,14 +11,22 @@ function Write-Ok($m){ Write-Host "PASS  $m" -ForegroundColor Green }
 function Write-No($m){ Write-Host "FAIL  $m" -ForegroundColor Red }
 function Json($obj){ $obj | ConvertTo-Json -Depth 8 -Compress }
 
-# Use the same secret as the API
+# Resolve script directory & make_jwt.py path (works on Windows & Linux)
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$MakeJwt   = Join-Path $ScriptDir 'make_jwt.py'
+if (-not (Test-Path $MakeJwt)) {
+  Write-Host "FAIL  make_jwt.py not found at: $MakeJwt" -ForegroundColor Red
+  Get-ChildItem -Recurse -File $ScriptDir | Out-Host
+  exit 1
+}
+
+# JWT secret (default for local/dev)
 $JwtSecret = $env:JWT_SECRET
 if (-not $JwtSecret) { $JwtSecret = "dev-secret" }
 
 # Generate trusted token if missing (signed with the same secret)
 if (-not (Test-Path $TrustedJwtFile)) {
-  if (-not (Test-Path "scripts\make_jwt.py")) { Write-No "scripts\make_jwt.py missing"; exit 1 }
-  $token = python "scripts\make_jwt.py" "trusted_tenant" $JwtSecret
+  $token = python $MakeJwt "trusted_tenant" $JwtSecret
   if (-not $token) { Write-No "couldn't generate JWT"; exit 1 }
   $token | Out-File -Encoding ascii $TrustedJwtFile
 }
