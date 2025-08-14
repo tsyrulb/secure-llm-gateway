@@ -26,11 +26,11 @@ if (-not $JwtSecret) { $JwtSecret = "dev-secret" }
 
 # Generate trusted token if missing (signed with the same secret)
 if (-not (Test-Path $TrustedJwtFile)) {
-  $token = python $MakeJwt "trusted_tenant" $JwtSecret
+  $token = (python $MakeJwt "trusted_tenant" $JwtSecret).Trim()
   if (-not $token) { Write-No "couldn't generate JWT"; exit 1 }
-  $token | Out-File -Encoding ascii $TrustedJwtFile
+  $token | Out-File -Encoding ascii -NoNewline $TrustedJwtFile
 }
-$Trusted = Get-Content -Raw $TrustedJwtFile
+$Trusted = (Get-Content -Raw $TrustedJwtFile).Trim()
 
 # Robust request helper that works on Windows PS 5.1 and pwsh 7+
 function Invoke-GatewayRequest {
@@ -40,7 +40,8 @@ function Invoke-GatewayRequest {
     [Parameter(Mandatory)] [string]$Token
   )
 
-  $headers = @{ Authorization = "Bearer $Token"; "Content-Type" = "application/json" }
+  $auth = ("Bearer " + $Token).Trim()
+  $headers = @{ Authorization = $auth; "Content-Type" = "application/json" }
   $uri = "$BaseUrl$Path"
   $payload = Json $Body
 
