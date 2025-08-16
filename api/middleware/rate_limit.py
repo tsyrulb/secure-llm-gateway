@@ -1,56 +1,60 @@
-import os
+# api/middleware/rate_limit.py
+from __future__ import annotations
+
 import time
-from typing import Optional
-from fastapi import Request, HTTPException, status
 
-# Optional Redis support
 try:
-    from redis import asyncio as aioredis  # type: ignore
-except Exception:  # pragma: no cover
-    aioredis = None  # type: ignore
+    from redis.asyncio import Redis
+except Exception:  # redis is optional for local/dev
+    Redis = None  # type: ignore[misc,assignment]
 
-WINDOW = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
-MAX_REQ = int(os.getenv("RATE_LIMIT_MAX_REQUESTS", "60"))
-REDIS_URL = os.getenv("REDIS_URL")
+from fastapi import Request
 
-# In-memory fallback store: {key: [(ts1), (ts2), ...]}
-# NOTE: For single-process dev/testing only.
-_inmem = {}
+# In-memory fallback: key -> (count, window_start_epoch_seconds)
+_inmem: dict[str, tuple[int, float]] = {}
 
-async def _incr_redis(key: str) -> int:
-    assert aioredis is not None
-    r = aioredis.from_url(REDIS_URL, encoding="utf-8", decode_responses=True)
-    # Use a single key per window bucket
-    bucket = int(time.time()) // WINDOW
-    k = f"rl:{key}:{bucket}"
-    pipe = r.pipeline()
-    pipe.incr(k, 1)
-    pipe.expire(k, WINDOW + 5)
-    count, _ = await pipe.execute()
-    return int(count)
+REDIS_URL = None  # set via env/config if you want to use Redis
 
-def _incr_inmem(key: str) -> int:
+
+def _inmem_hit(key: str, limit: int, window_seconds: int) -> None:
     now = time.time()
-    bucket = int(now) // WINDOW
-    k = f"{key}:{bucket}"
-    _inmem.setdefault(k, 0)
-    _inmem[k] += 1
-    # best-effort cleanup of older buckets
-    for oldk in list(_inmem.keys()):
-        if oldk.endswith(f":{bucket-2}"):
-            _inmem.pop(oldk, None)
-    return _inmem[k]
+    count, start = _inmem.get(key, (0, now))
+    # reset window if expired
+    if now - start >= window_seconds:
+        count, start = 0, now
+    count += 1
+    _inmem[key] = (count, start)
+    if count > limit:
+        raise RuntimeError("rate limit exceeded")
 
-async def rate_limit(request: Request, tenant: Optional[dict] = None) -> None:
-    # key by tenant if present, else client host
-    ident = (tenant or {}).get("id") or request.client.host or "anon"
-    key = f"{ident}"
-    if REDIS_URL and aioredis is not None:
-        count = await _incr_redis(key)
-    else:
-        count = _incr_inmem(key)
-    if count > MAX_REQ:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Rate limit exceeded ({count}/{MAX_REQ} in {WINDOW}s)"
-        )
+
+def get_redis() -> Redis | None:  # pyright: ignore[reportInvalidTypeForm]
+    """Create a Redis client if REDIS_URL is configured and redis is available."""
+    if REDIS_URL and Redis is not None:
+        # mypy knows Redis is not None in this branch
+        return Redis.from_url(REDIS_URL, encoding="utf-8", decode_responses=True)
+    return None
+
+
+async def rate_limit(request: Request) -> None:
+    """
+    Simple token-bucket-ish limit: 5 req / 1s per tenant.
+    If Redis is available, use it; otherwise fall back to in-memory.
+    """
+    tenant = request.state.tenant if hasattr(request.state, "tenant") else "anon"
+    key = f"rl:{tenant}"
+    limit = 5
+    window = 1
+
+    r = get_redis()
+    if r is None:
+        _inmem_hit(key, limit, window)
+        return
+
+    # Redis path
+    pipe = r.pipeline()
+    pipe.incr(key)
+    pipe.expire(key, window)
+    count, _ = await pipe.execute()
+    if int(count) > limit:
+        raise RuntimeError("rate limit exceeded")

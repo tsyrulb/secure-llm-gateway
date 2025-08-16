@@ -33,7 +33,7 @@ services:
     depends_on:
       opa:
         condition: service_healthy
-    
+
     # Environment variables for non-sensitive configuration.
     environment:
       - OPA_URL=http://opa:8181/v1/data/gateway/deny

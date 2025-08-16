@@ -1,22 +1,23 @@
-from typing import Any, Dict, List
 import logging
+from typing import Any
 
 log = logging.getLogger("uvicorn.error")
 
-async def local_policy_deny(input_doc: Dict[str, Any]) -> List[str]:
+
+async def local_policy_deny(input_doc: dict[str, Any]) -> list[str]:
     """
     Local fallback policy. Return a list of deny messages (empty => allow).
     """
-    denies: List[str] = []
+    denies: list[str] = []
 
     tenant = str(input_doc.get("tenant", "")).strip()
-    model  = str(input_doc.get("model", "")).strip()
-    max_t  = int(input_doc.get("max_tokens") or 0)
-    eurl   = str(input_doc.get("egress_url") or "").strip()
+    model = str(input_doc.get("model", "")).strip()
+    max_t = int(input_doc.get("max_tokens") or 0)
+    eurl = str(input_doc.get("egress_url") or "").strip()
 
     # normalize
     tenant_l = tenant.lower()
-    model_l  = model.lower()
+    model_l = model.lower()
 
     # 1) Block gpt-4o (and variants) for non-trusted tenants
     if "openai:gpt-4o" in model_l and tenant_l != "trusted_tenant":
@@ -31,5 +32,12 @@ async def local_policy_deny(input_doc: Dict[str, Any]) -> List[str]:
         denies.append(f"egress blocked: {eurl}")
 
     # DEBUG: print exactly what we evaluated
-    log.info(f"local_policy input tenant={tenant!r} model={model!r} max_tokens={max_t} egress_url={eurl!r} -> denies={denies}")
+    log.info(
+        "local_policy input tenant=%r model=%r max_tokens=%s egress_url=%r -> denies=%r",
+        tenant,
+        model,
+        max_t,
+        eurl,
+        denies,
+    )
     return denies

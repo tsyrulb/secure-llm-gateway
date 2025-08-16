@@ -1,11 +1,13 @@
-import os
 import logging
-from typing import Any, Dict, List
+import os
+from typing import Any
+
 import httpx
 
 log = logging.getLogger("uvicorn.error")
 
-def _normalize(res: Any) -> List[str]:
+
+def _normalize(res: Any) -> list[str]:
     if res is None:
         return []
     if isinstance(res, list):
@@ -17,18 +19,19 @@ def _normalize(res: Any) -> List[str]:
     if isinstance(res, str):
         return [res]
     if isinstance(res, dict):
-        out: List[str] = []
+        out: list[str] = []
         for k, v in res.items():
             if isinstance(v, bool) and v:
                 out.append(k)
-            elif isinstance(v, (list, set)):
+            elif isinstance(v, list | set):
                 out.extend([str(x) for x in v])
             elif isinstance(v, str):
                 out.append(v)
         return out
     return [str(res)]
 
-async def opa_deny(input_doc: Dict[str, Any]) -> List[str]:
+
+async def opa_deny(input_doc: dict[str, Any]) -> list[str]:
     """
     Query OPA for deny reasons. Empty list => allow.
     Fail-closed behavior is controlled by OPA_FAIL_CLOSED (default: true).

@@ -1,11 +1,20 @@
 # scripts/make_jwt.py
-import sys, os, json, time, hmac, hashlib, base64
+import base64
+import hashlib
+import hmac
+import json
+import os
+import sys
+import time
+
 
 def b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
 
+
 def sign(secret: str, msg: bytes) -> str:
     return b64url(hmac.new(secret.encode(), msg, hashlib.sha256).digest())
+
 
 def make_jwt(sub: str, secret: str, ttl: int = 3600) -> str:
     header = {"alg": "HS256", "typ": "JWT"}
@@ -15,6 +24,7 @@ def make_jwt(sub: str, secret: str, ttl: int = 3600) -> str:
     p = b64url(json.dumps(payload, separators=(",", ":")).encode())
     sig = sign(secret, f"{h}.{p}".encode())
     return f"{h}.{p}.{sig}"
+
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
